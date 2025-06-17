@@ -4,6 +4,7 @@ import { type FC, useEffect, useState } from "react";
 import { Socket } from "socket.io-client";
 import useSWR from "swr";
 
+// タイムスタンプを「YYYY-MM-DD HH:mm:ss」形式にフォーマットする関数
 const formatTimestamp = (timestamp: string | Date) => {
 	const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
 
@@ -18,22 +19,27 @@ const formatTimestamp = (timestamp: string | Date) => {
 };
 
 type Props = {
-	socket: Socket;
+	socket: Socket; // Socket.ioのソケットを受け取る
 };
 
 const Component: FC<Props> = ({ socket }) => {
+	// IRセンサーの状態を管理するステート
 	const [sensors, setSensors] = useState<IRSensorValue[]>([]);
 
+	// APIからセンサーリストを取得。fetcherはuseSWR内部で自動的に行われる
 	const { data, error, isLoading } = useSWR<IRSensorValue[]>("/sensor-list");
 
+	// APIからデータ取得後にセンサーリストをセット
 	useEffect(() => {
 		if (data) {
 			setSensors(data);
 		}
 	}, [data]);
 
+	// WebSocketでIRセンサーの更新を受信したときの処理
 	useEffect(() => {
 		socket.on("ir_sensor_update", (updatedSensor: IRSensorValue) => {
+			// 更新されたセンサーだけを差し替える
 			setSensors((prev) =>
 				prev.map((sensor) =>
 					sensor.id === updatedSensor.id ? updatedSensor : sensor,
@@ -41,11 +47,13 @@ const Component: FC<Props> = ({ socket }) => {
 			);
 		});
 
+		// コンポーネントアンマウント時にイベントリスナー解除
 		return () => {
 			socket.off("ir_sensor_update");
 		};
 	}, [socket]);
 
+	// センサーの「実行」ボタン押下時の処理
 	const handleExecute = (sensor: IRSensorValue) => {
 		const instance = fetchInstance();
 		instance
@@ -58,6 +66,7 @@ const Component: FC<Props> = ({ socket }) => {
 			});
 	};
 
+	// センサーの「学習」ボタン押下時の処理
 	const handleLearn = (sensor: IRSensorValue) => {
 		const instance = fetchInstance();
 		instance
@@ -70,10 +79,12 @@ const Component: FC<Props> = ({ socket }) => {
 			});
 	};
 
+	// 新しいセンサー作成処理
 	const handleCreate = async () => {
 		const instance = fetchInstance();
 
 		try {
+			// Metricsを収集しているdeviceを取得
 			const metricsResponse = await instance.get("/devices?collectMetrics=1");
 			const device = metricsResponse.data[0];
 
@@ -82,25 +93,30 @@ const Component: FC<Props> = ({ socket }) => {
 				return;
 			}
 
+			// 新しいセンサーの初期データを作成
 			const newSensor = {
 				device: device,
 				name: "新しいセンサー",
 				data: "",
 			};
 
+			// APIにPOSTしてセンサー作成
 			const response = await instance.post("/sensor-list", newSensor);
+			// 作成したセンサーをステートに追加
 			setSensors((prev) => [...prev, response.data]);
 		} catch (error) {
 			console.error("センサー作成エラー:", error);
 		}
 	};
 
+	// 入力欄の変更時に名前を更新（ローカルステートのみ）
 	const handleNameChange = (id: number, newName: string) => {
 		setSensors((prev) =>
 			prev.map((s) => (s.id === id ? { ...s, name: newName } : s)),
 		);
 	};
 
+	// 名前を保存ボタンでAPIに更新を送る
 	const handleSaveName = (sensor: IRSensorValue) => {
 		const instance = fetchInstance();
 		instance
@@ -113,11 +129,13 @@ const Component: FC<Props> = ({ socket }) => {
 			});
 	};
 
+	// センサー削除処理
 	const handleDelete = (sensor: IRSensorValue) => {
 		const instance = fetchInstance();
 		instance
 			.delete(`/sensor/${sensor.id}`)
 			.then((response) => {
+				// 削除に成功したらローカルの配列からも削除
 				setSensors((prev) => prev.filter((s) => s.id !== sensor.id));
 			})
 			.catch((error) => {
@@ -125,17 +143,21 @@ const Component: FC<Props> = ({ socket }) => {
 			});
 	};
 
+	// ローディング中の表示
 	if (isLoading) {
 		return <div>読み込み中...</div>;
 	}
 
+	// エラー発生時の表示
 	if (error) {
 		return <div>エラーが発生しました: {error.message}</div>;
 	}
 
+	// メインのレンダリング部分
 	return (
 		<div className="bg-gradient-to-br from-[#F9FAFB] to-[#EEF1F5] text-gray-800 font-sans min-h-screen p-6">
 			<div className="max-w-7xl mx-auto">
+				{/* タイトルと作成ボタン */}
 				<div className="flex items-center justify-between mb-8">
 					<h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-700">
 						📡 IRセンサーリスト
@@ -149,12 +171,14 @@ const Component: FC<Props> = ({ socket }) => {
 					</button>
 				</div>
 
+				{/* センサーカードのグリッド */}
 				<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 					{sensors.map((sensor) => (
 						<div
 							key={sensor.id}
 							className="bg-white rounded-2xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-all"
 						>
+							{/* センサー名編集欄 */}
 							<div className="mb-4">
 								<label
 									htmlFor="sensorName"
@@ -181,22 +205,27 @@ const Component: FC<Props> = ({ socket }) => {
 								</div>
 							</div>
 
+							{/* センサーのデバイスID表示 */}
 							<p className="text-sm text-gray-500 mb-1">
 								<span className="font-medium">Device ID:</span>{" "}
 								<span className="font-mono">{sensor.device.id}</span>
 							</p>
+							{/* センサーのデータ表示 */}
 							<p className="text-xs text-gray-400 break-words mb-2">
 								<span className="font-medium">Data:</span> {sensor.data}
 							</p>
+							{/* 作成日時表示 */}
 							<p className="text-xs text-gray-400">
 								<span className="font-medium">作成:</span>{" "}
 								{formatTimestamp(sensor.createdAt)}
 							</p>
+							{/* 更新日時表示 */}
 							<p className="text-xs text-gray-400 mb-4">
 								<span className="font-medium">更新:</span>{" "}
 								{formatTimestamp(sensor.updatedAt)}
 							</p>
 
+							{/* 実行・学習・削除ボタン群 */}
 							<div className="flex space-x-2">
 								<button
 									type="button"
@@ -222,6 +251,7 @@ const Component: FC<Props> = ({ socket }) => {
 							</div>
 						</div>
 					))}
+					{/* センサーが1つもない場合のメッセージ */}
 					{sensors.length === 0 && (
 						<div className="col-span-full text-center text-gray-400 text-sm">
 							センサーが登録されていません。

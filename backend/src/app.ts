@@ -35,3 +35,48 @@ const port = 8000;
 server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
+
+
+// 最新の環境データをメモリで保持（初期値はダミー）
+let latestEnvData = {
+  temperatureSht: 0,
+  temperatureQmp: 0,
+  humidity: 0,
+  pressure: 0,
+  updatedAt: new Date(),
+};
+// 環境ログをメモリに保存する配列（最新順）
+const envLogs: any[] = [];
+
+// POST /env-logs （すでにあるエンドポイント）内でログを保存
+app.post('/env-logs', (req, res) => {
+  const { temperatureSht, temperatureQmp, humidity, pressure } = req.body;
+
+  if (
+    typeof temperatureSht === 'number' &&
+    typeof temperatureQmp === 'number' &&
+    typeof humidity === 'number' &&
+    typeof pressure === 'number'
+  ) {
+    const newEntry = {
+      id: envLogs.length + 1,
+      temperatureSht,
+      temperatureQmp,
+      humidity,
+      pressure,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    envLogs.unshift(newEntry); // 新しいデータを先頭に追加
+    latestEnvData = newEntry;
+    res.status(200).json({ message: '環境値を更新しました', data: newEntry });
+  } else {
+    res.status(400).json({ message: '不正なデータ形式です' });
+  }
+});
+
+// 追加：GET /env-logs で最新N件を取得（limit指定あり）
+app.get('/env-logs', (req, res) => {
+  const limit = parseInt(req.query.limit as string) || 28;
+  res.json(envLogs.slice(0, limit));
+});
