@@ -12,28 +12,46 @@
  *  Author : K.Murakami
  */
 
+import { AppDataSource } from "./data-source";
+import { EnvLog } from "./entity/EnvLog";
+import { Device } from "./entity/Device";
 
-// Expressライブラリをインポート（Node.jsのWebアプリケーションフレームワーク）
-import express from 'express';
+// データベース接続
+AppDataSource.initialize()
+  .then(() => {
+    console.log("Database connected.");
+  })
+  .catch((err) => {
+    console.error("Database connection error:", err);
+  });
 
-// httpモジュールをインポート（Node.jsの標準モジュール、HTTPサーバーを作成するために使用）
-import http from 'http';
 
-// expressアプリケーションのインスタンスを作成
+import express from "express";
+import http from "http";
+import { Server as SocketIOServer } from "socket.io";
+
 const app = express();
-
-// HTTPサーバーをexpressアプリを基に作成
 const server = http.createServer(app);
+const io = new SocketIOServer(server, {
+  path: "/socket.io", // デフォルトなので省略可
+  cors: { origin: "*" }, // 開発環境用に適宜設定
+});
 
-// 受信するリクエストのボディをJSONとして自動的に解析するミドルウェアを追加
-app.use(express.json());
+io.on("connection", (socket) => {
+  console.log("Socket connected:", socket.id);
 
-// サーバーがリッスンするポート番号を指定
-const port = 8000;
+  // イベント受信例
+  socket.on("message", (msg) => {
+    console.log("Received message:", msg);
+  });
 
-// 指定したポートでHTTPサーバーを起動し、起動成功時にメッセージを出力
-server.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
+});
+
+server.listen(8000, () => {
+  console.log("Server running on port 8000");
 });
 
 
@@ -49,7 +67,7 @@ let latestEnvData = {
 const envLogs: any[] = [];
 
 // POST /env-logs （すでにあるエンドポイント）内でログを保存
-app.post('/env-logs', (req, res) => {
+app.post('/api/env-logs', async (req, res) => {
   const { temperatureSht, temperatureQmp, humidity, pressure } = req.body;
 
   if (
@@ -67,16 +85,51 @@ app.post('/env-logs', (req, res) => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    envLogs.unshift(newEntry); // 新しいデータを先頭に追加
+
+    // メモリ保存
+    envLogs.unshift(newEntry);
     latestEnvData = newEntry;
-    res.status(200).json({ message: '環境値を更新しました', data: newEntry });
+
+    // DB保存も追加
+    try {
+      const deviceRepo = AppDataSource.getRepository(Device);
+      let device = await deviceRepo.findOneBy({ id: 1 });
+      if (!device) {
+        device = deviceRepo.create({
+          macAddress: "00:11:22:33:44:55",
+          ipAddress: "192.168.0.100",
+          name: "ダミーデバイス",
+          location: "オフィスA",
+          collectMetrics: true,
+          registeredAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        await deviceRepo.save(device);
+      }
+
+      const envLogRepo = AppDataSource.getRepository(EnvLog);
+      const log = envLogRepo.create({
+        device,
+        temperatureSht,
+        temperatureQmp,
+        humidity,
+        pressure,
+      });
+      await envLogRepo.save(log);
+    } catch (err) {
+      console.error("DB保存エラー:", err);
+    }
+
+    res.status(200).json({ message: "保存成功", data: newEntry });
   } else {
-    res.status(400).json({ message: '不正なデータ形式です' });
+    res.status(400).json({ message: "不正なデータ形式です" });
   }
 });
 
+
 // 追加：GET /env-logs で最新N件を取得（limit指定あり）
-app.get('/env-logs', (req, res) => {
+app.get('/api/env-logs', (req, res) => {
   const limit = parseInt(req.query.limit as string) || 28;
   res.json(envLogs.slice(0, limit));
 });
